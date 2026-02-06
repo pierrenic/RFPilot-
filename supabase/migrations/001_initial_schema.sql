@@ -2,23 +2,33 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "vector";
 
--- Organizations
+-- Organizations (multi-tenant)
 CREATE TABLE organizations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
+  slug TEXT UNIQUE NOT NULL,
   logo_url TEXT,
+  is_test BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Users (extends Supabase auth.users)
 CREATE TABLE profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  email TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
   name TEXT,
   avatar_url TEXT,
-  org_id UUID REFERENCES organizations(id),
-  role TEXT DEFAULT 'member' CHECK (role IN ('admin', 'member')),
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Organization members (users can belong to multiple orgs)
+CREATE TABLE org_members (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  org_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  role TEXT DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(org_id, user_id)
 );
 
 -- Projects (one per RFP/tender)
@@ -36,7 +46,7 @@ CREATE TABLE projects (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Corpus (reusable document collections)
+-- Corpus (reusable document collections per org)
 CREATE TABLE corpus (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   org_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
@@ -124,7 +134,7 @@ CREATE TABLE project_members (
   project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   role TEXT DEFAULT 'writer' CHECK (role IN ('owner', 'writer', 'reviewer', 'validator')),
-  themes JSONB DEFAULT '[]'::jsonb, -- array of tags this member handles
+  themes JSONB DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(project_id, user_id)
 );
@@ -151,30 +161,161 @@ CREATE TABLE activities (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Enable RLS
+-- Enable RLS on all tables
 ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE org_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE corpus ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_corpus ENABLE ROW LEVEL SECURITY;
 ALTER TABLE corpus_documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE document_chunks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE corpus_slides ENABLE ROW LEVEL SECURITY;
+ALTER TABLE corpus_assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bricks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE brick_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
 
--- Basic RLS policies (users can access their org's data)
-CREATE POLICY "Users can view their org" ON organizations
-  FOR SELECT USING (id IN (SELECT org_id FROM profiles WHERE id = auth.uid()));
+-- Helper function: get user's org IDs
+CREATE OR REPLACE FUNCTION user_org_ids()
+RETURNS SETOF UUID AS $$
+  SELECT org_id FROM org_members WHERE user_id = auth.uid();
+$$ LANGUAGE sql SECURITY DEFINER;
 
-CREATE POLICY "Users can view their profile" ON profiles
-  FOR SELECT USING (id = auth.uid() OR org_id IN (SELECT org_id FROM profiles WHERE id = auth.uid()));
+-- RLS Policies
 
-CREATE POLICY "Users can view their org projects" ON projects
-  FOR SELECT USING (org_id IN (SELECT org_id FROM profiles WHERE id = auth.uid()));
+-- Organizations: users see only their orgs
+CREATE POLICY "Users can view their orgs" ON organizations
+  FOR SELECT USING (id IN (SELECT user_org_ids()));
 
-CREATE POLICY "Users can view their org corpus" ON corpus
-  FOR SELECT USING (org_id IN (SELECT org_id FROM profiles WHERE id = auth.uid()));
+-- Profiles: users see profiles in their orgs
+CREATE POLICY "Users can view own profile" ON profiles
+  FOR SELECT USING (id = auth.uid());
+
+CREATE POLICY "Users can view org members profiles" ON profiles
+  FOR SELECT USING (id IN (
+    SELECT user_id FROM org_members WHERE org_id IN (SELECT user_org_ids())
+  ));
+
+CREATE POLICY "Users can update own profile" ON profiles
+  FOR UPDATE USING (id = auth.uid());
+
+-- Org members: users see members of their orgs
+CREATE POLICY "Users can view org members" ON org_members
+  FOR SELECT USING (org_id IN (SELECT user_org_ids()));
+
+-- Org admins can manage members
+CREATE POLICY "Admins can insert org members" ON org_members
+  FOR INSERT WITH CHECK (
+    org_id IN (SELECT org_id FROM org_members WHERE user_id = auth.uid() AND role = 'admin')
+  );
+
+CREATE POLICY "Admins can delete org members" ON org_members
+  FOR DELETE USING (
+    org_id IN (SELECT org_id FROM org_members WHERE user_id = auth.uid() AND role = 'admin')
+  );
+
+-- Projects: org isolation
+CREATE POLICY "Users can view org projects" ON projects
+  FOR SELECT USING (org_id IN (SELECT user_org_ids()));
+
+CREATE POLICY "Users can create org projects" ON projects
+  FOR INSERT WITH CHECK (org_id IN (SELECT user_org_ids()));
+
+CREATE POLICY "Users can update org projects" ON projects
+  FOR UPDATE USING (org_id IN (SELECT user_org_ids()));
+
+CREATE POLICY "Users can delete org projects" ON projects
+  FOR DELETE USING (org_id IN (SELECT user_org_ids()));
+
+-- Corpus: org isolation
+CREATE POLICY "Users can view org corpus" ON corpus
+  FOR SELECT USING (org_id IN (SELECT user_org_ids()));
+
+CREATE POLICY "Users can manage org corpus" ON corpus
+  FOR ALL USING (org_id IN (SELECT user_org_ids()));
+
+-- Corpus documents: via corpus org
+CREATE POLICY "Users can view corpus docs" ON corpus_documents
+  FOR SELECT USING (corpus_id IN (
+    SELECT id FROM corpus WHERE org_id IN (SELECT user_org_ids())
+  ));
+
+CREATE POLICY "Users can manage corpus docs" ON corpus_documents
+  FOR ALL USING (corpus_id IN (
+    SELECT id FROM corpus WHERE org_id IN (SELECT user_org_ids())
+  ));
+
+-- Document chunks: via corpus
+CREATE POLICY "Users can view chunks" ON document_chunks
+  FOR SELECT USING (corpus_document_id IN (
+    SELECT cd.id FROM corpus_documents cd
+    JOIN corpus c ON cd.corpus_id = c.id
+    WHERE c.org_id IN (SELECT user_org_ids())
+  ));
+
+-- Corpus slides/assets: via corpus
+CREATE POLICY "Users can view slides" ON corpus_slides
+  FOR SELECT USING (corpus_document_id IN (
+    SELECT cd.id FROM corpus_documents cd
+    JOIN corpus c ON cd.corpus_id = c.id
+    WHERE c.org_id IN (SELECT user_org_ids())
+  ));
+
+CREATE POLICY "Users can view assets" ON corpus_assets
+  FOR SELECT USING (corpus_document_id IN (
+    SELECT cd.id FROM corpus_documents cd
+    JOIN corpus c ON cd.corpus_id = c.id
+    WHERE c.org_id IN (SELECT user_org_ids())
+  ));
+
+-- Bricks: via project
+CREATE POLICY "Users can view bricks" ON bricks
+  FOR SELECT USING (project_id IN (
+    SELECT id FROM projects WHERE org_id IN (SELECT user_org_ids())
+  ));
+
+CREATE POLICY "Users can manage bricks" ON bricks
+  FOR ALL USING (project_id IN (
+    SELECT id FROM projects WHERE org_id IN (SELECT user_org_ids())
+  ));
+
+-- Project members: via project
+CREATE POLICY "Users can view project members" ON project_members
+  FOR SELECT USING (project_id IN (
+    SELECT id FROM projects WHERE org_id IN (SELECT user_org_ids())
+  ));
+
+-- Brick assignments: via brick/project
+CREATE POLICY "Users can view assignments" ON brick_assignments
+  FOR SELECT USING (brick_id IN (
+    SELECT b.id FROM bricks b
+    JOIN projects p ON b.project_id = p.id
+    WHERE p.org_id IN (SELECT user_org_ids())
+  ));
+
+-- Activities: via project
+CREATE POLICY "Users can view activities" ON activities
+  FOR SELECT USING (project_id IN (
+    SELECT id FROM projects WHERE org_id IN (SELECT user_org_ids())
+  ));
+
+CREATE POLICY "Users can create activities" ON activities
+  FOR INSERT WITH CHECK (project_id IN (
+    SELECT id FROM projects WHERE org_id IN (SELECT user_org_ids())
+  ));
+
+-- Project corpus: via project
+CREATE POLICY "Users can view project corpus links" ON project_corpus
+  FOR SELECT USING (project_id IN (
+    SELECT id FROM projects WHERE org_id IN (SELECT user_org_ids())
+  ));
+
+CREATE POLICY "Users can manage project corpus links" ON project_corpus
+  FOR ALL USING (project_id IN (
+    SELECT id FROM projects WHERE org_id IN (SELECT user_org_ids())
+  ));
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at()
@@ -193,3 +334,23 @@ CREATE TRIGGER update_projects_updated_at
 CREATE TRIGGER update_bricks_updated_at
   BEFORE UPDATE ON bricks
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- Function to auto-create profile on signup
+CREATE OR REPLACE FUNCTION handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO profiles (id, email, name, avatar_url)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'name', NEW.raw_user_meta_data->>'full_name'),
+    NEW.raw_user_meta_data->>'avatar_url'
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger for auto-creating profile
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION handle_new_user();
