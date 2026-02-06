@@ -1,5 +1,3 @@
-'use client'
-
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { 
@@ -10,6 +8,7 @@ import {
   Sparkles,
   ArrowRight
 } from "lucide-react"
+import Link from "next/link"
 
 export default function Home() {
   return (
@@ -24,8 +23,12 @@ export default function Home() {
             <span className="font-bold text-xl">RFPilot</span>
           </div>
           <div className="flex gap-3">
-            <Button variant="ghost">Se connecter</Button>
-            <Button>Commencer</Button>
+            <Link href="/login">
+              <Button variant="ghost">Se connecter</Button>
+            </Link>
+            <Link href="/login">
+              <Button>Commencer</Button>
+            </Link>
           </div>
         </div>
       </header>
@@ -44,13 +47,17 @@ export default function Home() {
           collaborez avec votre équipe, exportez en un clic.
         </p>
         <div className="flex gap-4 justify-center">
-          <Button size="lg" className="gap-2">
-            Démarrer un projet
-            <ArrowRight className="w-4 h-4" />
-          </Button>
-          <Button size="lg" variant="outline">
-            Voir une démo
-          </Button>
+          <Link href="/login">
+            <Button size="lg" className="gap-2">
+              Démarrer un projet
+              <ArrowRight className="w-4 h-4" />
+            </Button>
+          </Link>
+          <Link href="/login">
+            <Button size="lg" variant="outline">
+              Voir une démo
+            </Button>
+          </Link>
         </div>
       </section>
 
@@ -134,10 +141,12 @@ export default function Home() {
         <p className="text-lg text-slate-600 mb-8">
           Commencez gratuitement, sans engagement.
         </p>
-        <Button size="lg" className="gap-2">
-          Créer mon premier projet
-          <ArrowRight className="w-4 h-4" />
-        </Button>
+        <Link href="/login">
+          <Button size="lg" className="gap-2">
+            Créer mon premier projet
+            <ArrowRight className="w-4 h-4" />
+          </Button>
+        </Link>
       </section>
 
       {/* Footer */}
