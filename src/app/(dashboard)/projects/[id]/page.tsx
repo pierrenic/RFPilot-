@@ -9,6 +9,9 @@ import { toast } from 'sonner'
 import Link from 'next/link'
 import { BrickEditor } from '@/components/brick-editor'
 
+// TEST MODE
+const TEST_MODE = true
+
 interface Brick {
   id: string
   order_index: number
@@ -30,6 +33,51 @@ interface Project {
   source_file_name: string | null
   created_at: string
 }
+
+// Mock data for test mode
+const getMockProject = (id: string): Project => ({
+  id,
+  name: 'Projet Test AO',
+  description: 'Projet de démonstration pour tester les fonctionnalités',
+  status: 'draft',
+  deadline: '2026-03-01',
+  source_file_url: null,
+  source_file_name: null,
+  created_at: new Date().toISOString()
+})
+
+const getMockBricks = (): Brick[] => [
+  {
+    id: 'brick-1',
+    order_index: 1,
+    original_text: 'Décrivez votre expérience dans le domaine du Digital Product Passport.',
+    title: 'Expérience DPP',
+    tag: 'references',
+    status: 'draft',
+    response_text: null,
+    ai_response_text: null
+  },
+  {
+    id: 'brick-2',
+    order_index: 2,
+    original_text: 'Quelles sont les mesures de sécurité mises en place pour protéger les données ?',
+    title: 'Sécurité des données',
+    tag: 'technique',
+    status: 'draft',
+    response_text: null,
+    ai_response_text: null
+  },
+  {
+    id: 'brick-3',
+    order_index: 3,
+    original_text: 'Présentez votre grille tarifaire et les conditions de paiement.',
+    title: 'Tarification',
+    tag: 'financier',
+    status: 'draft',
+    response_text: null,
+    ai_response_text: null
+  }
+]
 
 const statusColors: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-700',
@@ -73,6 +121,14 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   async function loadProject() {
     setLoading(true)
     try {
+      if (TEST_MODE) {
+        // Use mock data in test mode
+        setProject(getMockProject(projectId))
+        setBricks(getMockBricks())
+        setLoading(false)
+        return
+      }
+
       const { data: proj, error: projError } = await supabase
         .from('projects')
         .select('*')

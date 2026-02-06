@@ -2,11 +2,46 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { Sidebar } from '@/components/sidebar'
 
+// TEST MODE - bypass auth for testing
+const TEST_MODE = true
+
+const mockUser = {
+  id: 'test-user-001',
+  email: 'pn@arianee.org',
+  user_metadata: { name: 'PN Test' }
+}
+
+const mockProfile = {
+  id: 'test-user-001',
+  email: 'pn@arianee.org',
+  name: 'PN Test',
+  avatar_url: null
+}
+
+const mockOrganizations = [
+  { id: 'test-org-001', name: 'Arianee', slug: 'arianee' }
+]
+
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  if (TEST_MODE) {
+    return (
+      <div className="flex h-screen bg-slate-50">
+        <Sidebar 
+          user={mockUser as any} 
+          profile={mockProfile} 
+          organizations={mockOrganizations} 
+        />
+        <main className="flex-1 overflow-auto">
+          {children}
+        </main>
+      </div>
+    )
+  }
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 

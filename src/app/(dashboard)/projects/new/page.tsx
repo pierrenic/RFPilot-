@@ -9,11 +9,17 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 
+// TEST MODE
+const TEST_MODE = true
+const TEST_ORG_ID = 'test-org-001'
+const TEST_USER_ID = 'test-user-001'
+
 export default function NewProjectPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [dragActive, setDragActive] = useState(false)
+  const [testProjects, setTestProjects] = useState<any[]>([])
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -24,6 +30,27 @@ export default function NewProjectPage() {
       const name = formData.get('name') as string
       const description = formData.get('description') as string
       const deadline = formData.get('deadline') as string
+
+      if (TEST_MODE) {
+        // In test mode, create a mock project locally
+        const mockProject = {
+          id: `test-project-${Date.now()}`,
+          name,
+          description,
+          deadline,
+          org_id: TEST_ORG_ID,
+          created_by: TEST_USER_ID,
+          status: 'draft',
+          source_file_name: file?.name || null
+        }
+        toast.success('Projet créé (mode test) !')
+        // Store in localStorage for test persistence
+        const existing = JSON.parse(localStorage.getItem('test_projects') || '[]')
+        existing.push(mockProject)
+        localStorage.setItem('test_projects', JSON.stringify(existing))
+        router.push(`/projects/${mockProject.id}`)
+        return
+      }
 
       const supabase = createClient()
       

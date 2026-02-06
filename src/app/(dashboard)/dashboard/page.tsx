@@ -4,6 +4,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import Link from 'next/link'
 
+// TEST MODE
+const TEST_MODE = true
+
 const statusColors: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-700',
   in_progress: 'bg-blue-100 text-blue-700',
@@ -19,18 +22,24 @@ const statusLabels: Record<string, string> = {
 }
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  let projects: any[] = []
+  
+  if (!TEST_MODE) {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
 
-  // Get user's projects through org membership
-  const { data: projects } = await supabase
-    .from('projects')
-    .select(`
-      *,
-      organizations(name),
-      bricks(count)
-    `)
-    .order('updated_at', { ascending: false })
+    // Get user's projects through org membership
+    const { data } = await supabase
+      .from('projects')
+      .select(`
+        *,
+        organizations(name),
+        bricks(count)
+      `)
+      .order('updated_at', { ascending: false })
+    
+    projects = data || []
+  }
 
   return (
     <div className="p-8">
