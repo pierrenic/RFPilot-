@@ -19,7 +19,7 @@ const mockProfile = {
 }
 
 const mockOrganizations = [
-  { id: 'test-org-001', name: 'Arianee', slug: 'arianee' }
+  { id: 'test-org-001', name: 'Arianee', slug: 'arianee', is_test: true }
 ]
 
 export default async function DashboardLayout({
