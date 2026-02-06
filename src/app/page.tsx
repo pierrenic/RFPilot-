@@ -21,7 +21,7 @@ export default function Home() {
             <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
               <FileText className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-xl">Bidly</span>
+            <span className="font-bold text-xl">RFPilot</span>
           </div>
           <div className="flex gap-3">
             <Button variant="ghost">Se connecter</Button>
@@ -143,7 +143,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t py-10">
         <div className="container mx-auto px-4 text-center text-slate-500 text-sm">
-          <p>© 2026 Bidly. Propulsé par Arianee.</p>
+          <p>© 2026 RFPilot. Propulsé par Arianee.</p>
         </div>
       </footer>
     </div>

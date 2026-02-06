@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Bidly - Répondez aux appels d'offres avec l'IA",
+  title: "RFPilot - Répondez aux appels d'offres avec l'IA",
   description: "Plateforme collaborative pour répondre aux appels d'offres avec assistance IA",
 };
 
