@@ -121,7 +121,9 @@ export async function POST(
     if (fileType === 'pdf') {
       try {
         const { extractText } = await import('unpdf')
-        const result = await extractText(buffer)
+        // unpdf requires Uint8Array, not Buffer
+        const uint8 = new Uint8Array(buffer)
+        const result = await extractText(uint8)
         textContent = result.text.join('\n')
       } catch (pdfErr) {
         console.error('PDF parse error:', pdfErr)

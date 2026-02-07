@@ -117,7 +117,9 @@ export async function POST(request: NextRequest) {
     if (ext === 'pdf') {
       // Use unpdf for serverless-compatible PDF parsing
       const { extractText } = await import('unpdf')
-      const result = await extractText(buffer)
+      // unpdf requires Uint8Array, not Buffer
+      const uint8 = new Uint8Array(buffer)
+      const result = await extractText(uint8)
       textContent = result.text.join('\n')
     } else if (ext === 'docx' || ext === 'doc') {
       // Dynamic import for mammoth

@@ -15,7 +15,9 @@ const anthropic = new Anthropic({
 // Use unpdf for serverless-compatible PDF parsing
 async function parsePDF(buffer: Buffer): Promise<string> {
   const { extractText } = await import('unpdf')
-  const result = await extractText(buffer)
+  // unpdf requires Uint8Array, not Buffer
+  const uint8 = new Uint8Array(buffer)
+  const result = await extractText(uint8)
   return result.text.join('\n')
 }
 
