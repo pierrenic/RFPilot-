@@ -12,11 +12,11 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 })
 
-// Dynamic import for pdf-parse v1.x
+// Use unpdf for serverless-compatible PDF parsing
 async function parsePDF(buffer: Buffer): Promise<string> {
-  const pdfParse = (await import('pdf-parse')).default
-  const data = await pdfParse(buffer)
-  return data.text
+  const { extractText } = await import('unpdf')
+  const result = await extractText(buffer)
+  return result.text
 }
 
 export async function POST(request: Request) {
