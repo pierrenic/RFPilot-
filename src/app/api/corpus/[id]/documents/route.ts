@@ -120,8 +120,7 @@ export async function POST(
     
     if (fileType === 'pdf') {
       try {
-        // @ts-expect-error - pdf-parse types issue
-        const pdfParse = (await import('pdf-parse')).default || (await import('pdf-parse'))
+        const pdfParse = (await import('pdf-parse')).default
         const data = await pdfParse(buffer)
         textContent = data.text
       } catch (pdfErr) {
