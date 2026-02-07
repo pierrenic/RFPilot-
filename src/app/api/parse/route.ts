@@ -76,9 +76,7 @@ export async function POST(request: Request) {
       ? documentText.substring(0, maxChars) + '\n[Document tronqué...]'
       : documentText
 
-    const prompt = `Tu es un expert en analyse d'appels d'offres.
-
-Voici le contenu d'un cahier des charges. Analyse-le et extrait TOUTES les questions, exigences, critères et points auxquels le soumissionnaire doit répondre.
+    const prompt = `Analyse ce cahier des charges et extrait les questions/exigences principales.
 
 DOCUMENT:
 """
@@ -86,17 +84,13 @@ ${textForAnalysis}
 """
 
 INSTRUCTIONS:
-- Extrais CHAQUE question, exigence, critère ou point qui nécessite une réponse
-- Ne limite pas le nombre - extrais TOUT ce qui est pertinent
-- Pour chaque élément, fournis:
-  1. "text": le texte exact ou reformulé de la question/exigence
-  2. "title": un titre court (max 10 mots)
-  3. "tag": une catégorie parmi: technique, juridique, financier, commercial, references, admin, other
+- Extrais les 15-20 questions/exigences les plus importantes
+- Format JSON uniquement, pas de texte avant/après
+- Tags: technique, juridique, financier, commercial, references, admin, other
 
-Réponds UNIQUEMENT en JSON valide avec ce format:
 {
   "questions": [
-    {"text": "...", "title": "...", "tag": "..."}
+    {"text": "description courte de l'exigence", "title": "titre court", "tag": "catégorie"}
   ]
 }`
 
