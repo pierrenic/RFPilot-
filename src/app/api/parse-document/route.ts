@@ -115,11 +115,10 @@ export async function POST(request: NextRequest) {
     const ext = fileName?.toLowerCase().split('.').pop() || ''
     
     if (ext === 'pdf') {
-      // Dynamic import for pdf-parse
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require('pdf-parse')
-      const data = await pdfParse(buffer)
-      textContent = data.text
+      // Use unpdf for serverless-compatible PDF parsing
+      const { extractText } = await import('unpdf')
+      const result = await extractText(buffer)
+      textContent = result.text.join('\n')
     } else if (ext === 'docx' || ext === 'doc') {
       // Dynamic import for mammoth
       // eslint-disable-next-line @typescript-eslint/no-require-imports

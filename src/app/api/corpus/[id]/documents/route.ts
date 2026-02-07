@@ -122,7 +122,7 @@ export async function POST(
       try {
         const { extractText } = await import('unpdf')
         const result = await extractText(buffer)
-        textContent = result.text
+        textContent = result.text.join('\n')
       } catch (pdfErr) {
         console.error('PDF parse error:', pdfErr)
         textContent = buffer.toString('utf-8')

@@ -16,7 +16,7 @@ const anthropic = new Anthropic({
 async function parsePDF(buffer: Buffer): Promise<string> {
   const { extractText } = await import('unpdf')
   const result = await extractText(buffer)
-  return result.text
+  return result.text.join('\n')
 }
 
 export async function POST(request: Request) {
