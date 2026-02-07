@@ -12,14 +12,11 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 })
 
-// Dynamic import for pdf-parse v2.x (uses PDFParse class)
+// Dynamic import for pdf-parse v1.x
 async function parsePDF(buffer: Buffer): Promise<string> {
-  const { PDFParse } = await import('pdf-parse')
-  // Convert Buffer to Uint8Array for pdf-parse
-  const data = new Uint8Array(buffer)
-  const parser = new PDFParse({ data })
-  const result = await parser.getText()
-  return result.text
+  const pdfParse = (await import('pdf-parse')).default
+  const data = await pdfParse(buffer)
+  return data.text
 }
 
 export async function POST(request: Request) {
