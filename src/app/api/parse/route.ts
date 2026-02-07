@@ -14,7 +14,6 @@ const anthropic = new Anthropic({
 
 // Dynamic import for pdf-parse v2.x (uses PDFParse class)
 async function parsePDF(buffer: Buffer): Promise<string> {
-  // @ts-expect-error - pdf-parse types issue
   const { PDFParse } = await import('pdf-parse')
   // Convert Buffer to Uint8Array for pdf-parse
   const data = new Uint8Array(buffer)
