@@ -1,11 +1,10 @@
-import { createClient } from '@/lib/supabase/server'
+'use client'
+
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import Link from 'next/link'
-
-// TEST MODE
-const TEST_MODE = true
 
 const statusColors: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-700',
@@ -21,24 +20,31 @@ const statusLabels: Record<string, string> = {
   completed: 'Terminé',
 }
 
-export default async function DashboardPage() {
-  let projects: any[] = []
-  
-  if (!TEST_MODE) {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+export default function DashboardPage() {
+  const [projects, setProjects] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
 
-    // Get user's projects through org membership
-    const { data } = await supabase
-      .from('projects')
-      .select(`
-        *,
-        organizations(name),
-        bricks(count)
-      `)
-      .order('updated_at', { ascending: false })
-    
-    projects = data || []
+  useEffect(() => {
+    async function fetchProjects() {
+      try {
+        const res = await fetch('/api/projects')
+        const data = await res.json()
+        setProjects(data.projects || [])
+      } catch (error) {
+        console.error('Failed to fetch projects:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchProjects()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="p-8 flex items-center justify-center">
+        <div className="animate-pulse">Chargement...</div>
+      </div>
+    )
   }
 
   return (
@@ -70,11 +76,6 @@ export default async function DashboardPage() {
                       {statusLabels[project.status]}
                     </Badge>
                   </div>
-                  {project.organizations && (
-                    <CardDescription className="text-xs">
-                      {project.organizations.name}
-                    </CardDescription>
-                  )}
                 </CardHeader>
                 <CardContent>
                   {project.description && (

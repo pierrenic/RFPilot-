@@ -9,9 +9,9 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 
-// TEST MODE
+// TEST MODE - use real org ID
 const TEST_MODE = true
-const TEST_ORG_ID = 'test-org-001'
+const TEST_ORG_ID = '86934efc-fa20-467a-8a8d-abbfc4af79ef'
 const TEST_USER_ID = 'test-user-001'
 
 export default function NewProjectPage() {
@@ -32,23 +32,52 @@ export default function NewProjectPage() {
       const deadline = formData.get('deadline') as string
 
       if (TEST_MODE) {
-        // In test mode, create a mock project locally
-        const mockProject = {
-          id: `test-project-${Date.now()}`,
-          name,
-          description,
-          deadline,
-          org_id: TEST_ORG_ID,
-          created_by: TEST_USER_ID,
-          status: 'draft',
-          source_file_name: file?.name || null
+        // Upload file first if provided
+        let fileUrl = null
+        let fileName = null
+        
+        if (file) {
+          toast.info('Upload du fichier...')
+          const uploadFormData = new FormData()
+          uploadFormData.append('file', file)
+          uploadFormData.append('bucket', 'rfp-documents')
+          
+          const uploadRes = await fetch('/api/upload', {
+            method: 'POST',
+            body: uploadFormData
+          })
+          
+          if (!uploadRes.ok) {
+            const error = await uploadRes.json()
+            throw new Error(error.error || 'Upload failed')
+          }
+          
+          const uploadData = await uploadRes.json()
+          fileUrl = uploadData.url
+          fileName = uploadData.fileName
         }
-        toast.success('Projet créé (mode test) !')
-        // Store in localStorage for test persistence
-        const existing = JSON.parse(localStorage.getItem('test_projects') || '[]')
-        existing.push(mockProject)
-        localStorage.setItem('test_projects', JSON.stringify(existing))
-        router.push(`/projects/${mockProject.id}`)
+
+        // Create project with file URL
+        const res = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            description,
+            deadline,
+            source_file_url: fileUrl,
+            source_file_name: fileName
+          })
+        })
+        
+        if (!res.ok) {
+          const error = await res.json()
+          throw new Error(error.error || 'Failed to create project')
+        }
+        
+        const { project } = await res.json()
+        toast.success('Projet créé !')
+        router.push(`/projects/${project.id}`)
         return
       }
 

@@ -19,7 +19,7 @@ const mockProfile = {
 }
 
 const mockOrganizations = [
-  { id: 'test-org-001', name: 'Arianee', slug: 'arianee', is_test: true }
+  { id: '86934efc-fa20-467a-8a8d-abbfc4af79ef', name: 'Arianee', slug: 'arianee', is_test: false }
 ]
 
 export default async function DashboardLayout({

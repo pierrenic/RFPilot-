@@ -8,6 +8,91 @@ const supabase = createClient(
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
 
+// Split text into chunks for processing large documents
+function splitTextIntoChunks(text: string, maxChunkSize: number = 25000): string[] {
+  const chunks: string[] = []
+  const paragraphs = text.split(/\n\n+/)
+  let currentChunk = ''
+  
+  for (const para of paragraphs) {
+    if ((currentChunk + para).length > maxChunkSize) {
+      if (currentChunk) chunks.push(currentChunk.trim())
+      currentChunk = para
+    } else {
+      currentChunk += '\n\n' + para
+    }
+  }
+  if (currentChunk) chunks.push(currentChunk.trim())
+  return chunks
+}
+
+async function extractQuestionsFromChunk(textChunk: string, chunkIndex: number): Promise<{ text: string; tag: string; title?: string }[]> {
+  const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY!,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-3-haiku-20240307',
+      max_tokens: 4096,
+      messages: [
+        {
+          role: 'user',
+          content: `Tu es un expert en analyse de cahiers des charges et appels d'offres.
+
+Analyse ce fragment de document (partie ${chunkIndex + 1}) et extrait TOUTES les questions, exigences, critères ou points qui nécessitent une réponse de la part du soumissionnaire.
+
+IMPORTANT: 
+- Extrait CHAQUE exigence individuellement, même les sous-points
+- Inclus les critères d'évaluation, les prérequis techniques, les certifications demandées
+- Ne regroupe pas plusieurs questions en une seule
+- Génère un titre court (max 8 mots) pour chaque question
+
+Pour chaque élément, détermine sa catégorie:
+- technique: spécifications techniques, architecture, performances, sécurité
+- juridique: aspects légaux, conformité, RGPD, contrats
+- financier: prix, budget, conditions de paiement
+- commercial: délais, SLA, support, formation
+- references: expériences similaires, cas clients, portfolio
+- admin: documents administratifs, attestations, formulaires
+- other: autres
+
+Réponds UNIQUEMENT avec un JSON valide:
+{
+  "questions": [
+    {"text": "Question complète", "title": "Titre court", "tag": "technique"}
+  ]
+}
+
+DOCUMENT:
+${textChunk}`,
+        },
+      ],
+    }),
+  })
+
+  if (!claudeResponse.ok) {
+    console.error('Claude API error:', await claudeResponse.text())
+    return []
+  }
+
+  const claudeData = await claudeResponse.json()
+  const aiContent = claudeData.content?.[0]?.text || ''
+
+  try {
+    const jsonMatch = aiContent.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0])
+      return parsed.questions || []
+    }
+  } catch (e) {
+    console.error('Failed to parse AI response:', e)
+  }
+  return []
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { projectId, fileUrl, fileName } = await request.json()
@@ -50,78 +135,67 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Could not extract text from document' }, { status: 400 })
     }
 
-    // Use Claude to extract questions from the document
-    const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY!,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
-        messages: [
-          {
-            role: 'user',
-            content: `Tu es un expert en analyse de cahiers des charges et appels d'offres.
+    console.log(`Extracted ${textContent.length} characters from document`)
 
-Analyse le document suivant et extrait TOUTES les questions, exigences, critères ou points qui nécessitent une réponse de la part du soumissionnaire.
+    // Split into chunks and process each
+    const chunks = splitTextIntoChunks(textContent)
+    console.log(`Processing ${chunks.length} chunks`)
 
-Pour chaque élément extrait, détermine sa catégorie parmi : technique, juridique, financier, commercial, references, admin, other
+    let allQuestions: { text: string; tag: string; title?: string }[] = []
+    
+    // Process chunks sequentially to avoid rate limits
+    for (let i = 0; i < chunks.length; i++) {
+      console.log(`Processing chunk ${i + 1}/${chunks.length}`)
+      const questions = await extractQuestionsFromChunk(chunks[i], i)
+      allQuestions = allQuestions.concat(questions)
+      
+      // Small delay between chunks to avoid rate limiting
+      if (i < chunks.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+    }
 
-Réponds UNIQUEMENT avec un JSON valide (pas de markdown, pas de texte avant ou après) dans ce format:
-{
-  "questions": [
-    {"text": "La question ou exigence exacte", "tag": "technique"},
-    {"text": "Une autre question", "tag": "juridique"}
-  ]
-}
-
-DOCUMENT À ANALYSER:
-${textContent.slice(0, 30000)}`,
-          },
-        ],
-      }),
+    // Deduplicate questions by text similarity
+    const seen = new Set<string>()
+    const uniqueQuestions = allQuestions.filter(q => {
+      const key = q.text.toLowerCase().slice(0, 100)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
     })
 
-    if (!claudeResponse.ok) {
-      const error = await claudeResponse.text()
-      console.error('Claude API error:', error)
-      return NextResponse.json({ error: 'Failed to analyze document with AI' }, { status: 500 })
-    }
+    console.log(`Found ${uniqueQuestions.length} unique questions`)
 
-    const claudeData = await claudeResponse.json()
-    const aiContent = claudeData.content?.[0]?.text || ''
-
-    // Parse the JSON response
-    let questions: { text: string; tag: string }[] = []
-    try {
-      // Try to extract JSON from the response
-      const jsonMatch = aiContent.match(/\{[\s\S]*\}/)
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0])
-        questions = parsed.questions || []
-      }
-    } catch (e) {
-      console.error('Failed to parse AI response:', e)
-      // Fallback: split by lines and treat each as a question
+    if (uniqueQuestions.length === 0) {
+      // Fallback: extract from text directly
       const lines = textContent.split('\n').filter((line: string) => {
         const trimmed = line.trim()
-        return trimmed.length > 20 && (trimmed.includes('?') || /^\d+[\.\)]/.test(trimmed))
+        return trimmed.length > 20 && (
+          trimmed.includes('?') || 
+          /^\d+[\.\)]\s/.test(trimmed) ||
+          /^[-•]\s/.test(trimmed) ||
+          trimmed.toLowerCase().includes('fournir') ||
+          trimmed.toLowerCase().includes('décrire') ||
+          trimmed.toLowerCase().includes('préciser')
+        )
       })
-      questions = lines.slice(0, 50).map((line: string) => ({ text: line.trim(), tag: 'other' }))
+      uniqueQuestions.push(...lines.slice(0, 100).map((line: string) => ({ 
+        text: line.trim(), 
+        tag: 'other',
+        title: line.trim().slice(0, 50)
+      })))
     }
 
-    if (questions.length === 0) {
+    if (uniqueQuestions.length === 0) {
       return NextResponse.json({ error: 'No questions found in document' }, { status: 400 })
     }
 
     // Insert bricks into database
-    const bricks = questions.map((q, index) => ({
+    const bricks = uniqueQuestions.map((q, index) => ({
       project_id: projectId,
       order_index: index,
       original_text: q.text,
+      title: q.title || null,
       tag: q.tag || 'other',
       status: 'draft',
     }))
@@ -143,8 +217,10 @@ ${textContent.slice(0, 30000)}`,
 
     return NextResponse.json({ 
       success: true, 
-      bricksCount: questions.length,
-      questions: questions.slice(0, 5) // Preview
+      bricksCount: uniqueQuestions.length,
+      documentLength: textContent.length,
+      chunksProcessed: chunks.length,
+      questions: uniqueQuestions.slice(0, 10) // Preview
     })
 
   } catch (error) {

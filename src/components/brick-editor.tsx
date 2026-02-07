@@ -1,12 +1,20 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { toast } from 'sonner'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { toast } from 'sonner'
 
 interface Brick {
   id: string
@@ -17,21 +25,17 @@ interface Brick {
   status: string
   response_text: string | null
   ai_response_text: string | null
+  ai_sources?: string[]
 }
 
-interface BrickEditorProps {
-  brick: Brick
-  onClose: () => void
-  onSave: (brickId: string, responseText: string) => Promise<void>
-  onStatusChange: (brickId: string, status: string) => Promise<void>
-  onReload: () => void
-}
-
-const statusColors: Record<string, string> = {
-  draft: 'bg-slate-100 text-slate-700',
-  writing: 'bg-blue-100 text-blue-700',
-  review: 'bg-amber-100 text-amber-700',
-  validated: 'bg-green-100 text-green-700',
+const tagLabels: Record<string, string> = {
+  technique: 'Technique',
+  juridique: 'Juridique',
+  financier: 'Financier',
+  commercial: 'Commercial',
+  references: 'Références',
+  admin: 'Admin',
+  other: 'Autre',
 }
 
 const statusLabels: Record<string, string> = {
@@ -41,245 +45,239 @@ const statusLabels: Record<string, string> = {
   validated: 'Validé',
 }
 
-const statusFlow = ['draft', 'writing', 'review', 'validated']
-
-export function BrickEditor({ brick, onClose, onSave, onStatusChange, onReload }: BrickEditorProps) {
+export function BrickEditor({ 
+  brick, 
+  projectId,
+  onClose, 
+  onUpdate 
+}: { 
+  brick: Brick
+  projectId: string
+  onClose: () => void
+  onUpdate: (brick: Brick) => void
+}) {
+  const [status, setStatus] = useState(brick.status)
+  const [tag, setTag] = useState(brick.tag)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
-  const [currentStatus, setCurrentStatus] = useState(brick.status)
+  const [sources, setSources] = useState<string[]>(brick.ai_sources || [])
 
   const editor = useEditor({
     extensions: [StarterKit],
     content: brick.response_text || brick.ai_response_text || '',
     editorProps: {
       attributes: {
-        class: 'prose prose-sm max-w-none focus:outline-none min-h-[200px] p-4',
+        class: 'prose prose-sm max-w-none min-h-[200px] p-3 focus:outline-none',
       },
     },
   })
 
-  const handleSave = useCallback(async () => {
-    if (!editor) return
+  // Update editor content when brick changes
+  useEffect(() => {
+    if (editor && brick) {
+      const newContent = brick.response_text || brick.ai_response_text || ''
+      if (editor.getHTML() !== newContent) {
+        editor.commands.setContent(newContent)
+      }
+      setStatus(brick.status)
+      setTag(brick.tag)
+      setSources(brick.ai_sources || [])
+    }
+  }, [brick, editor])
+
+  const handleSave = async () => {
     setSaving(true)
     try {
-      const html = editor.getHTML()
-      await onSave(brick.id, html)
+      const supabase = createClient()
+      const response = editor?.getHTML() || ''
+      const { error } = await supabase
+        .from('bricks')
+        .update({
+          response_text: response,
+          status,
+          tag,
+        })
+        .eq('id', brick.id)
+
+      if (error) throw error
+
+      toast.success('Réponse enregistrée')
+      onUpdate({ ...brick, response_text: response, status, tag })
+    } catch (error) {
+      console.error(error)
+      toast.error('Erreur lors de la sauvegarde')
     } finally {
       setSaving(false)
     }
-  }, [editor, brick.id, onSave])
-
-  const handleStatusChange = async (newStatus: string) => {
-    await onStatusChange(brick.id, newStatus)
-    setCurrentStatus(newStatus)
   }
 
-  const generateAIResponse = async () => {
+  const handleGenerate = async () => {
     setGenerating(true)
     try {
-      const response = await fetch('/api/generate-response', {
+      const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          projectId,
           brickId: brick.id,
           question: brick.original_text,
-          projectContext: '',
         }),
       })
 
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error)
+      if (!res.ok) throw new Error('Generation failed')
 
-      // Update editor with AI response
-      if (editor && result.response) {
-        editor.commands.setContent(result.response)
+      const data = await res.json()
+      editor?.commands.setContent(data.response)
+      setSources(data.sources || [])
+      
+      if (data.usedRAG && data.sources?.length > 0) {
+        toast.success(`Réponse générée avec ${data.sources.length} source(s)`)
+      } else {
+        toast.success('Réponse générée par l\'IA')
       }
-      toast.success('Réponse IA générée !')
-      onReload()
     } catch (error) {
       console.error(error)
-      toast.error('Erreur de génération')
+      toast.error('Erreur lors de la génération')
     } finally {
       setGenerating(false)
     }
   }
 
-  const useAIResponse = () => {
-    if (editor && brick.ai_response_text) {
-      editor.commands.setContent(brick.ai_response_text)
-      toast.success('Réponse IA copiée dans l\'éditeur')
-    }
-  }
-
-  const copyToClipboard = () => {
-    if (!editor) return
-    const text = editor.getText()
-    navigator.clipboard.writeText(text)
-    toast.success('Copié dans le presse-papiers')
-  }
-
-  const currentStatusIndex = statusFlow.indexOf(currentStatus)
-  const nextStatus = statusFlow[currentStatusIndex + 1]
-  const prevStatus = statusFlow[currentStatusIndex - 1]
-
   return (
-    <Card className="border-2 border-blue-200">
-      <CardHeader className="border-b bg-slate-50">
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-sm font-medium text-slate-400">
-                Question #{brick.order_index + 1}
-              </span>
-              <Badge className={statusColors[currentStatus]}>
-                {statusLabels[currentStatus]}
-              </Badge>
-            </div>
-            <CardTitle className="text-lg font-normal text-slate-900">
-              {brick.original_text}
-            </CardTitle>
-          </div>
+    <Card className="sticky top-8">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg">Question {brick.order_index + 1}</CardTitle>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            <XIcon className="h-5 w-5" />
+            <XIcon className="h-4 w-4" />
           </Button>
         </div>
       </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Original question */}
+        <div className="p-3 bg-slate-50 rounded-lg">
+          <p className="text-sm text-slate-700">{brick.original_text}</p>
+        </div>
 
-      <CardContent className="p-0">
-        {/* Toolbar */}
-        <div className="flex items-center gap-2 p-3 border-b bg-white">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => editor?.chain().focus().toggleBold().run()}
-            className={editor?.isActive('bold') ? 'bg-slate-200' : ''}
-          >
-            <BoldIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => editor?.chain().focus().toggleItalic().run()}
-            className={editor?.isActive('italic') ? 'bg-slate-200' : ''}
-          >
-            <ItalicIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => editor?.chain().focus().toggleBulletList().run()}
-            className={editor?.isActive('bulletList') ? 'bg-slate-200' : ''}
-          >
-            <ListIcon className="h-4 w-4" />
-          </Button>
-          <div className="flex-1" />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={generateAIResponse}
-            disabled={generating}
-          >
-            {generating ? (
-              <SpinnerIcon className="h-4 w-4 animate-spin" />
-            ) : (
-              <SparklesIcon className="h-4 w-4" />
-            )}
-            <span className="ml-1">Générer IA</span>
-          </Button>
-          {brick.ai_response_text && (
-            <Button variant="outline" size="sm" onClick={useAIResponse}>
-              Utiliser IA
+        {/* Tag & Status */}
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="text-xs font-medium text-slate-500 mb-1 block">Catégorie</label>
+            <Select value={tag} onValueChange={setTag}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(tagLabels).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex-1">
+            <label className="text-xs font-medium text-slate-500 mb-1 block">Statut</label>
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(statusLabels).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Response with Tiptap editor */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs font-medium text-slate-500">Réponse</label>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={handleGenerate}
+              disabled={generating}
+            >
+              <SparklesIcon className="h-4 w-4 mr-1" />
+              {generating ? 'Génération...' : 'Générer avec l\'IA'}
             </Button>
-          )}
-        </div>
-
-        {/* Editor */}
-        <div className="border-b">
-          <EditorContent editor={editor} />
-        </div>
-
-        {/* AI Response Preview */}
-        {brick.ai_response_text && (
-          <div className="p-4 bg-violet-50 border-b">
-            <div className="flex items-center gap-2 mb-2">
-              <SparklesIcon className="h-4 w-4 text-violet-600" />
-              <span className="text-sm font-medium text-violet-700">Suggestion IA</span>
+          </div>
+          
+          {/* Toolbar */}
+          {editor && (
+            <div className="flex gap-1 p-1 border-b bg-slate-50 rounded-t-lg">
+              <button
+                onClick={() => editor.chain().focus().toggleBold().run()}
+                className={`p-1.5 rounded hover:bg-slate-200 ${editor.isActive('bold') ? 'bg-slate-200' : ''}`}
+                title="Gras"
+              >
+                <BoldIcon className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => editor.chain().focus().toggleItalic().run()}
+                className={`p-1.5 rounded hover:bg-slate-200 ${editor.isActive('italic') ? 'bg-slate-200' : ''}`}
+                title="Italique"
+              >
+                <ItalicIcon className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => editor.chain().focus().toggleBulletList().run()}
+                className={`p-1.5 rounded hover:bg-slate-200 ${editor.isActive('bulletList') ? 'bg-slate-200' : ''}`}
+                title="Liste"
+              >
+                <ListIcon className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => editor.chain().focus().toggleOrderedList().run()}
+                className={`p-1.5 rounded hover:bg-slate-200 ${editor.isActive('orderedList') ? 'bg-slate-200' : ''}`}
+                title="Liste numérotée"
+              >
+                <OrderedListIcon className="h-4 w-4" />
+              </button>
             </div>
-            <div 
-              className="text-sm text-violet-900 prose prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: brick.ai_response_text }}
-            />
+          )}
+          
+          <div className="border rounded-b-lg min-h-[200px]">
+            <EditorContent editor={editor} />
+          </div>
+        </div>
+
+        {/* RAG Sources */}
+        {sources.length > 0 && (
+          <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+            <div className="flex items-center gap-1 text-xs font-medium text-green-600 mb-2">
+              <BookIcon className="h-3 w-3" />
+              Sources utilisées
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {sources.map((source, i) => (
+                <Badge key={i} variant="secondary" className="bg-green-100 text-green-700 text-xs">
+                  {source}
+                </Badge>
+              ))}
+            </div>
           </div>
         )}
 
         {/* Actions */}
-        <div className="flex items-center justify-between p-4 bg-slate-50">
-          <div className="flex items-center gap-2">
-            {/* Workflow buttons */}
-            {prevStatus && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleStatusChange(prevStatus)}
-              >
-                ← {statusLabels[prevStatus]}
-              </Button>
-            )}
-            {nextStatus && (
-              <Button
-                size="sm"
-                onClick={() => handleStatusChange(nextStatus)}
-                className={nextStatus === 'validated' ? 'bg-green-600 hover:bg-green-700' : ''}
-              >
-                {statusLabels[nextStatus]} →
-              </Button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={copyToClipboard}>
-              <CopyIcon className="h-4 w-4 mr-1" />
-              Copier
-            </Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Sauvegarde...' : 'Sauvegarder'}
-            </Button>
-          </div>
+        <div className="flex gap-2 pt-2">
+          <Button onClick={handleSave} disabled={saving} className="flex-1">
+            {saving ? 'Enregistrement...' : 'Enregistrer'}
+          </Button>
+          <Button variant="outline" onClick={() => setStatus('review')}>
+            Soumettre en relecture
+          </Button>
         </div>
       </CardContent>
     </Card>
   )
 }
 
-// Icons
 function XIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  )
-}
-
-function BoldIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 12h8a4 4 0 004-4c0-2.5-2-4-4-4H6v8zm0 0h9a4 4 0 014 4c0 2.5-2 4-4 4H6v-8z" />
-    </svg>
-  )
-}
-
-function ItalicIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 4h4m-2 0v16m-4 0h4" transform="skewX(-10)" />
-    </svg>
-  )
-}
-
-function ListIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
     </svg>
   )
 }
@@ -292,19 +290,43 @@ function SparklesIcon({ className }: { className?: string }) {
   )
 }
 
-function SpinnerIcon({ className }: { className?: string }) {
+function BoldIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 4h8a4 4 0 014 4 4 4 0 01-4 4H6z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 12h9a4 4 0 014 4 4 4 0 01-4 4H6z" />
     </svg>
   )
 }
 
-function CopyIcon({ className }: { className?: string }) {
+function ItalicIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 4h4m-2 0l-4 16m0 0h4" />
+    </svg>
+  )
+}
+
+function ListIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+    </svg>
+  )
+}
+
+function OrderedListIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h10M7 16h10M3 8h.01M3 12h.01M3 16h.01" />
+    </svg>
+  )
+}
+
+function BookIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
     </svg>
   )
 }
