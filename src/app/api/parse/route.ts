@@ -46,21 +46,27 @@ export async function POST(request: Request) {
     
     if (fileUrl) {
       try {
+        console.log('Downloading PDF from:', fileUrl)
         // Download the PDF
         const response = await fetch(fileUrl)
         if (!response.ok) {
-          throw new Error('Failed to download file')
+          throw new Error(`Failed to download file: ${response.status} ${response.statusText}`)
         }
         
         const arrayBuffer = await response.arrayBuffer()
+        console.log('Downloaded PDF, size:', arrayBuffer.byteLength)
         const buffer = Buffer.from(arrayBuffer)
         
         // Parse PDF
         documentText = await parsePDF(buffer)
         console.log(`Extracted ${documentText.length} chars from PDF`)
-      } catch (pdfError) {
-        console.error('PDF parsing error:', pdfError)
-        // Continue without PDF content
+      } catch (pdfError: any) {
+        console.error('PDF parsing error:', pdfError?.message || pdfError)
+        // Return error instead of continuing silently
+        return NextResponse.json({ 
+          error: `PDF parsing failed: ${pdfError?.message || 'Unknown error'}`,
+          stack: pdfError?.stack?.substring(0, 500)
+        }, { status: 500 })
       }
     }
 
