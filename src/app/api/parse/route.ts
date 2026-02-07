@@ -12,12 +12,13 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 })
 
-// Dynamic import for pdf-parse (CommonJS module)
+// Dynamic import for pdf-parse v2.x (uses PDFParse class)
 async function parsePDF(buffer: Buffer): Promise<string> {
   // @ts-expect-error - pdf-parse types issue
-  const pdfParse = (await import('pdf-parse')).default || (await import('pdf-parse'))
-  const data = await pdfParse(buffer)
-  return data.text
+  const { PDFParse } = await import('pdf-parse')
+  const parser = new PDFParse({ data: buffer })
+  const result = await parser.getText()
+  return result.text
 }
 
 export async function POST(request: Request) {
